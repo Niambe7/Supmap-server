@@ -1,6 +1,11 @@
 const express = require('express');
 const { initializeDatabase } = require('./db');
 require('dotenv').config();
+const passport = require('passport');
+const session = require('express-session');
+const cors = require('cors') 
+const authRoutes = require("./routes/auth");
+
 
 const app = express();
 app.use(express.json());
@@ -13,8 +18,15 @@ app.get('/', (req, res) => {
   res.send('Bienvenue sur SUPMAP API 🚀');
 });
 
+app.use(cors());
+app.use(session({ secret: 'SECRET_KEY', resave: false, saveUninitialized: true }));
+app.use(passport.initialize());
+app.use(passport.session());
+
 const userRoutes = require('./routes/userRoutes');
 app.use('/api/users', userRoutes);
+app.use("/api/users", authRoutes);
+
 
 const itineraryRoutes = require('./routes/itineraryRoutes');
 app.use('/api/itineraries', itineraryRoutes);
