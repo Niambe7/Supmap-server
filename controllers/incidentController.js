@@ -2,7 +2,8 @@ const { pool } = require('../db'); // Connexion à PostgreSQL
 
 // Signaler un incident
 const reportIncident = async (req, res) => {
-  const { type, latitude, longitude, description, user_id } = req.body;
+  const { type, latitude, longitude, description} = req.body;
+  const user_id = req.user.id ;
 
   // Vérification des champs obligatoires
   if (!type || !latitude || !longitude || !user_id) {

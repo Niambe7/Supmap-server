@@ -1,8 +1,9 @@
 const { pool } = require('../db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
-const SECRET_KEY = 'SECRET_KEY'; // 🔐 Remplace par une clé sécurisée (stocke-la dans `.env`)
+const SECRET_KEY = process.env.SECRET_KEY; // 🔐 Remplace par une clé sécurisée (stocke-la dans `.env`)
 
 // ✅ Fonction d'inscription (Register)
 const registerUser = async (req, res) => {
