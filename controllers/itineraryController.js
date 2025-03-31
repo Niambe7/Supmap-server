@@ -1,5 +1,6 @@
 const { pool } = require('../db'); // Connexion à PostgreSQL
 const { Client } = require('@googlemaps/google-maps-services-js'); // Google Maps API
+const polyline = require('@mapbox/polyline'); // ➕ Ajout du décodeur de polylines
 const client = new Client({});
 
 // Rechercher un itinéraire
@@ -16,16 +17,17 @@ const searchItinerary = async (req, res) => {
       params: {
         origin: start_location,
         destination: end_location,
+        mode: 'driving',
         key: process.env.GOOGLE_API_KEY,
       },
     });
 
-    // Extraire les données de l'itinéraire
+    // ➤ Extraire et décoder la polyline
+    const encodedPolyline = response.data.routes[0].overview_polyline.points;
+    const decodedPoints = polyline.decode(encodedPolyline);
+    const routePoints = decodedPoints.map(([lat, lng]) => ({ lat, lng }));
+
     const route = response.data.routes[0];
-    const routePoints = route.legs[0].steps.map((step) => ({
-      lat: step.end_location.lat,
-      lng: step.end_location.lng,
-    }));
 
     // Enregistrer l'itinéraire dans la base de données
     const result = await pool.query(
@@ -36,32 +38,30 @@ const searchItinerary = async (req, res) => {
         start_location,
         end_location,
         JSON.stringify(routePoints),
-        route.legs[0].duration.value, // Durée en secondes
-        route.legs[0].distance.value, // Distance en mètres
-        0, // Coût par défaut
-        false, // Tolérance aux péages
+        route.legs[0].duration.value,
+        route.legs[0].distance.value,
+        0,
+        false,
       ]
     );
 
     res.status(201).json({ message: 'Itinéraire créé', itinerary: result.rows[0] });
   } catch (error) {
-    console.error('Erreur lors de la recherche d\'itinéraire :', error.message);
-    res.status(500).json({ error: 'Erreur lors de la recherche d\'itinéraire.' });
+    console.error("Erreur lors de la recherche d'itinéraire :", error.message);
+    res.status(500).json({ error: "Erreur lors de la recherche d'itinéraire." });
   }
 };
 
-// Recalculer l'itinéraire en cas d'incidents
+// Recalculer l'itinéraire en cas d'incidents (inchangé sauf si tu veux aussi améliorer ici)
 const recalculateItinerary = async (req, res) => {
-  const { itinerary_id, incidents = [] } = req.body; // incidents devient optionnel
+  const { itinerary_id, incidents = [] } = req.body;
 
   if (!itinerary_id) {
     return res.status(400).json({ error: "Le champ 'itinerary_id' est requis." });
   }
 
   try {
-    // 1. Récupérer l'itinéraire initial
     const result = await pool.query('SELECT * FROM itineraries WHERE id = $1', [itinerary_id]);
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Itinéraire non trouvé.' });
     }
@@ -69,15 +69,13 @@ const recalculateItinerary = async (req, res) => {
     const itinerary = result.rows[0];
     const routePoints = JSON.parse(itinerary.route_points);
 
-    // 2. Vérifier si des incidents sont fournis (sinon on les récupère depuis la base)
     let activeIncidents = incidents;
     if (incidents.length === 0) {
       const incidentsResult = await pool.query("SELECT * FROM incidents WHERE status = 'active'");
       activeIncidents = incidentsResult.rows;
     }
 
-    // 3. Vérifier si des incidents affectent l'itinéraire
-    const tolerance = 0.01; // ~1 km
+    const tolerance = 0.01;
     const affectedIncidents = activeIncidents.filter(incident =>
       routePoints.some(point =>
         Math.abs(point.lat - incident.latitude) < tolerance &&
@@ -92,29 +90,27 @@ const recalculateItinerary = async (req, res) => {
       });
     }
 
-    // 4. Recalculer l'itinéraire en évitant les incidents
     const response = await client.directions({
       params: {
         origin: itinerary.start_location,
         destination: itinerary.end_location,
+        mode: 'driving',
         avoid: 'tolls',
         key: process.env.GOOGLE_API_KEY,
       },
     });
 
-    const newRoute = response.data.routes[0];
-    const newRoutePoints = newRoute.legs[0].steps.map(step => ({
-      lat: step.end_location.lat,
-      lng: step.end_location.lng,
-    }));
+    const encodedPolyline = response.data.routes[0].overview_polyline.points;
+    const decodedPoints = polyline.decode(encodedPolyline);
+    const newRoutePoints = decodedPoints.map(([lat, lng]) => ({ lat, lng }));
 
     res.status(200).json({
       message: 'Itinéraire recalculé en évitant les incidents',
       old_route: routePoints,
       new_route: {
         route_points: newRoutePoints,
-        duration: newRoute.legs[0].duration.value,
-        distance: newRoute.legs[0].distance.value,
+        duration: response.data.routes[0].legs[0].duration.value,
+        distance: response.data.routes[0].legs[0].distance.value,
       },
       affected_incidents: affectedIncidents,
     });
